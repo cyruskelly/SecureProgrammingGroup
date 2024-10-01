@@ -33,9 +33,9 @@ RSA* Client::get_private_rsa_keypair() {
 }
 
 std::string Client::get_public_rsa_keypair() {
-    char *rsa = new char[1024]; // Declare and initialize 'rsa' variable as a pointer
+    char* rsa = new char[1024]; // Declare and initialize 'rsa' variable as a pointer
     char *temp = new char[1024]; // Declare and initialize 'temp' variable as a pointer
-
+    
     FILE* fp = fopen("./data/public.pem", "r");
     fprintf(stderr, "Public key file opened\n");
     if (fp == NULL) {
@@ -43,15 +43,17 @@ std::string Client::get_public_rsa_keypair() {
         Client::get_private_rsa_keypair();
         fprintf(stderr, "Private key pair generated\n");
         FILE* fp = fopen("./data/public.pem", "r");
-
+    
     }
-
+    
     while(fgets(temp, 100, fp)) {
-        rsa = strcat(rsa, temp);
+        strcat(rsa, temp);
     }
     fprintf(stderr, "Public key: %s\n", rsa);
     fclose(fp);
-    return trim(rsa);
+    std::string rsaString(rsa);
+    delete[] rsa;
+    return trim(rsaString);
 }
 
 int Client::make_request(struct lws *wsi, const char *message, lws_write_protocol type) {
@@ -61,6 +63,10 @@ int Client::make_request(struct lws *wsi, const char *message, lws_write_protoco
         lws_cancel_service(lws_get_context(wsi));  // Stops the WebSocket service
         return -1;
     }
+
+    std::string request = strcat(strcat("\"type\": \"signed_data\", \"data\": ", message), "\"counter\": 12345, \"signature\": ");
+
+    request += get_public_rsa_keypair();
 
     // Prepare buffer with the required padding
     unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + MAX_MESSAGE_LENGTH + LWS_SEND_BUFFER_POST_PADDING];

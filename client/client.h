@@ -2,6 +2,7 @@
 #include <string>
 #include "encrypt.h"
 #include "../libs/libwebsockets.h"
+#include "../libs/base64.hpp"
 
 
 #define MAX_MESSAGE_LENGTH 1024

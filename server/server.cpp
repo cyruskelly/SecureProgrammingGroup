@@ -5,11 +5,14 @@
 
 int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
     char *received_message = (char *)in;
+    rapidjson::Document d;
+
     switch (reason) {
         case LWS_CALLBACK_RECEIVE:
             received_message[len] = '\0';  // Make sure to null-terminate the message
             printf("Message received: %s\n", received_message);
             // Here you would decrypt and handle the received message
+            d = parse_json(received_message);
 
             
             break;
@@ -24,6 +27,12 @@ int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
             break;
     }
     return 0;
+}
+
+rapidjson::Document Server::parse_json(const char *json) {
+    rapidjson::Document d;
+    d.Parse(json);
+    return d;
 }
 
 int Server::server_main(void) {
