@@ -1,7 +1,8 @@
-#include <libwebsockets.h>
 #include <stdio.h>
 #include <string>
 #include "encrypt.h"
+#include "../libs/libwebsockets.h"
+
 
 #define MAX_MESSAGE_LENGTH 1024
 #ifndef CLIENT_OLAF_N

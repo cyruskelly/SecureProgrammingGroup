@@ -2,7 +2,8 @@
 #include <vector>
 #include <string>
 #include <cstring>
-#include <libwebsockets.h>
+#include "../libs/libwebsockets.h"
+#include "../libs/rapidjson/document.h"
 
 
 class Server {
