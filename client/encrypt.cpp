@@ -1,10 +1,4 @@
-#include <openssl/rsa.h>
-#include <openssl/pem.h>
-#include <openssl/err.h>
-#include <openssl/sha.h>
-#include <openssl/evp.h>
-#include <openssl/rand.h>
-#include <string.h>
+#include "encrypt.h"
 
 RSA* generate_rsa_keypair() {
     RSA* rsa = RSA_new();
