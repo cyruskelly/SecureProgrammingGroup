@@ -2,15 +2,23 @@
 
 #define MAX_MESSAGE_LENGTH 1024
 
+std::string trim(const std::string& line) {
+    const char* WhiteSpace = " \t\v\r\n";
+    std::size_t end = line.find_last_not_of(WhiteSpace);
+    return line.substr(0, end + 1);
+}
+
+
 RSA* Client::get_private_rsa_keypair() {
     RSA* rsa = nullptr; // Declare and initialize 'rsa' variable
 
     FILE* fp = fopen("./data/private.pem", "r");
     if (fp == NULL) {
-        fclose(fp);
 
         rsa = generate_rsa_keypair(); // Assign value to 'rsa'
+        fprintf(stderr, "RSA key pair generated\n");
         save_rsa_private_key(rsa, "./data/private.pem");
+        fprintf(stderr, "Private key pair saved\n");
         save_rsa_public_key(rsa, "./data/public.pem");
 
     } else {
@@ -24,17 +32,26 @@ RSA* Client::get_private_rsa_keypair() {
     return rsa;
 }
 
-RSA* Client::get_public_rsa_keypair() {
-    RSA* rsa = nullptr; // Declare and initialize 'rsa' variable
+std::string Client::get_public_rsa_keypair() {
+    char *rsa = new char[1024]; // Declare and initialize 'rsa' variable as a pointer
+    char *temp = new char[1024]; // Declare and initialize 'temp' variable as a pointer
 
     FILE* fp = fopen("./data/public.pem", "r");
+    fprintf(stderr, "Public key file opened\n");
     if (fp == NULL) {
+        fprintf(stderr, "Public key file not found\n");
         Client::get_private_rsa_keypair();
-    } else {
+        fprintf(stderr, "Private key pair generated\n");
+        FILE* fp = fopen("./data/public.pem", "r");
+
     }
-    rsa = PEM_read_RSA_PUBKEY(fp, NULL, NULL, NULL); // Assign value to 'rsa'
+
+    while(fgets(temp, 100, fp)) {
+        rsa = strcat(rsa, temp);
+    }
+    fprintf(stderr, "Public key: %s\n", rsa);
     fclose(fp);
-    return rsa;
+    return trim(rsa);
 }
 
 int Client::make_request(struct lws *wsi, const char *message, lws_write_protocol type) {
@@ -61,6 +78,7 @@ int Client::make_request(struct lws *wsi, const char *message, lws_write_protoco
 }
 
 int Client::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
+    std::string rsa;
     switch (reason) {
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
             printf("Client connected to server\n");
@@ -75,11 +93,11 @@ int Client::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
             */
 
             // Generate RSA key pair
-            RSA* rsa;
             rsa = Client::get_public_rsa_keypair();
 
             char message[MAX_MESSAGE_LENGTH];
-            snprintf(message, MAX_MESSAGE_LENGTH, "{ \"data\": { \"type\": \"hello\", \"public_key\": \"%s\" } }", rsa);
+            snprintf(message, MAX_MESSAGE_LENGTH, "{ \"data\": { \"type\": \"hello\", \"public_key\": \"%s\" } }", rsa.c_str());
+            make_request(wsi, message, LWS_WRITE_TEXT);
 
 
             lws_callback_on_writable(wsi);  // Request a writable event after connecting

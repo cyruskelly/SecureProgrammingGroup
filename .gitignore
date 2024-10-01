@@ -1,3 +1,5 @@
 .vscode/
 server_implementation/server
 client_implementation/client
+client/data/
+server/data/

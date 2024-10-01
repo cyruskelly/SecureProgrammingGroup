@@ -12,7 +12,7 @@ class Client {
     public:
         static RSA* get_private_rsa_keypair();
 
-        static RSA* get_public_rsa_keypair();
+        static std::string get_public_rsa_keypair();
 
         static int make_request(struct lws *wsi, const char *message, lws_write_protocol type);
 
