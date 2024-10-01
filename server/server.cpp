@@ -17,6 +17,7 @@ class Server {
                 received_message[len] = '\0';  // Make sure to null-terminate the message
                 printf("Message received: %s\n", received_message);
                 // Here you would decrypt and handle the received message
+                
                 break;
             case LWS_CALLBACK_ESTABLISHED:
                 printf("Client connected\n");
