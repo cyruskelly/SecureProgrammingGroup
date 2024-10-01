@@ -28,13 +28,13 @@ int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
     }
     return 0;
 }
-
+/*
 rapidjson::Document Server::parse_json(const char *json) {
     rapidjson::Document d;
     d.Parse(json);
     return d;
 }
-
+*/
 int Server::server_main(void) {
     int port;
     std::cout << "Enter port number: ";
