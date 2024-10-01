@@ -5,7 +5,8 @@
 
 int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
     char *received_message = (char *)in;
-    rapidjson::Document d;
+    rapidjson::Document * d;
+    std::string rq_type;
 
     switch (reason) {
         case LWS_CALLBACK_RECEIVE:
@@ -13,7 +14,41 @@ int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
             printf("Message received: %s\n", received_message);
             // Here you would decrypt and handle the received message
             d = parse_json(received_message);
+            rq_type = (*d)["data"]["type"].GetString();
 
+            if (rq_type == "hello") {
+                // Add the client to the list of clients
+                add_client(received_message);
+
+            } else if (rq_type == "client_update") {
+                // Clients are stored as {client},\n within the file and can be multiline
+                FILE* file = fopen("/data/clients.txt", "r");
+                std::vector<std::string> clients;
+                char line[1024];
+                char client[1024];
+                while (fgets(line, 1024, file)) {
+                    if (line[0] == '{') {
+                        client[0] = '\0';
+                    } else if (line[0] == '}') {
+                        clients.push_back(client);
+                    } else {
+                        strcat(client, line);
+                    }
+                }
+                fclose(file);
+                // TODO: Format the list of clients into the following format:
+                /*
+                {
+                    "type": "client_update",
+                    "clients": [
+                        "<PEM of exported RSA public key of client>",
+                    ]
+                }
+                */
+
+                // TODO: Send the list of clients to all other servers
+
+            }
             
             break;
         case LWS_CALLBACK_ESTABLISHED:
@@ -28,13 +63,13 @@ int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
     }
     return 0;
 }
-/*
-rapidjson::Document Server::parse_json(const char *json) {
-    rapidjson::Document d;
-    d.Parse(json);
+
+rapidjson::Document * Server::parse_json(const char *json) {
+    rapidjson::Document * d = new rapidjson::Document();
+    d->Parse(json);
     return d;
 }
-*/
+
 int Server::server_main(void) {
     int port;
     std::cout << "Enter port number: ";
@@ -67,9 +102,23 @@ int Server::server_main(void) {
     return 0;
 }
 
-int Server::add_client(std::vector<std::string> &client_list, std::string client) {
-    client_list.push_back(client);
-    return 0;
+std::vector<std::string> Server::list_servers() {
+    FILE *file = fopen("/data/servers.txt", "r");
+    char line[1024];
+    std::vector<std::string> servers;
+    while (fgets(line, 1024, file)) {
+        servers.push_back(line);
+    }
+    fclose(file);
+    return servers;
+}
+
+
+
+int Server::add_client(std::string client) {
+    FILE *file = fopen("/data/clients.txt", "a");
+    fprintf(file, "{\n%s\n},\n", client.c_str());
+    fclose(file);
 }
 
 

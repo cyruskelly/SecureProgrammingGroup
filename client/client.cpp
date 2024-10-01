@@ -66,7 +66,8 @@ int Client::make_request(struct lws *wsi, const char *message, lws_write_protoco
 
     std::string request = strcat(strcat("\"type\": \"signed_data\", \"data\": ", message), "\"counter\": 12345, \"signature\": ");
 
-    //request += base64::to_base64(get_public_rsa_keypair() + "12345");
+    // TODO [Raiyan]: Update below line to use base64 encoding for the signature
+    request = request + get_public_rsa_keypair() + "12345";
 
     // Prepare buffer with the required padding
     unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + MAX_MESSAGE_LENGTH + LWS_SEND_BUFFER_POST_PADDING];
