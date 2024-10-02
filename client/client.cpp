@@ -1,6 +1,6 @@
 #include "client.h"
 
-#define MAX_MESSAGE_LENGTH 1024
+#define MAX_MESSAGE_LENGTH 8192
 
 std::string trim(const std::string& line) {
     const char* WhiteSpace = " \t\v\r\n";
@@ -33,8 +33,9 @@ RSA* Client::get_private_rsa_keypair() {
 }
 
 std::string Client::get_public_rsa_keypair() {
-    char* rsa = new char[1024]; // Declare and initialize 'rsa' variable as a pointer
-    char *temp = new char[1024]; // Declare and initialize 'temp' variable as a pointer
+    std::string rsa;
+    rsa = "";
+    char temp[1024]; // Declare and initialize 'temp' variable as a pointer
     
     FILE* fp = fopen("./data/public.pem", "r");
     fprintf(stderr, "Public key file opened\n");
@@ -46,14 +47,14 @@ std::string Client::get_public_rsa_keypair() {
     
     }
     
-    while(fgets(temp, 100, fp)) {
-        strcat(rsa, temp);
+    while(fgets(temp, sizeof(temp), fp)) {
+        rsa += temp;
     }
-    fprintf(stderr, "Public key: %s\n", rsa);
+    fprintf(stderr, "Public key: %s\n", rsa.c_str());
     fclose(fp);
-    std::string rsaString(rsa);
-    delete[] rsa;
-    return trim(rsaString);
+    fprintf(stderr, "Public key file closed\n");
+    rsa = trim(rsa);
+    return rsa;
 }
 
 int Client::make_request(struct lws *wsi, const char *message, lws_write_protocol type) {
@@ -63,22 +64,44 @@ int Client::make_request(struct lws *wsi, const char *message, lws_write_protoco
         lws_cancel_service(lws_get_context(wsi));  // Stops the WebSocket service
         return -1;
     }
+    rapidjson::Document doc;
+    doc.Parse(message);
+    if (doc.HasParseError()) {
+        printf("Error parsing JSON message\n");
+        return -1;
+    }
 
-    std::string request = strcat(strcat("\"type\": \"signed_data\", \"data\": ", message), "\"counter\": 12345, \"signature\": ");
+    rapidjson::Document d_request;
+    d_request.SetObject();
+    d_request.AddMember("type", "signed_data", d_request.GetAllocator());
+// Assuming 'doc' is a rapidjson::Document and 'data' is a rapidjson::Value
+    d_request.AddMember("data", doc, d_request.GetAllocator());
+    d_request.AddMember("counter", 12345, d_request.GetAllocator());
+
+    std::string signature;
 
     // TODO [Raiyan]: Update below line to use base64 encoding for the signature
-    request = request + get_public_rsa_keypair() + "12345";
+    signature = get_public_rsa_keypair() + "12345"; // Dummy signature
+
+    rapidjson::Value signatureValue;
+    signatureValue.SetString(signature.c_str(), d_request.GetAllocator());
+
+
+    d_request.AddMember("signature", signatureValue, d_request.GetAllocator());
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    d_request.Accept(writer);
 
     // Prepare buffer with the required padding
     unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + MAX_MESSAGE_LENGTH + LWS_SEND_BUFFER_POST_PADDING];
     memset(buf, 0, sizeof(buf)); // Clear the buffer
 
-    size_t n = strlen(message);
-    memcpy(buf + LWS_SEND_BUFFER_PRE_PADDING, message, n);  // Copy the message into the buffer
+    size_t n = strlen(buffer.GetString());
+    memcpy(buf + LWS_SEND_BUFFER_PRE_PADDING, buffer.GetString(), n);  // Copy the message into the buffer
 
     // Send the message over WebSocket
     lws_write(wsi, buf + LWS_SEND_BUFFER_PRE_PADDING, n, type);
-    printf("Sending message: %s\n", message);
+    printf("Sending message: %s\n", buffer.GetString());
 
     // Request the WebSocket to be writable again for the next message
     lws_callback_on_writable(wsi);
@@ -86,6 +109,12 @@ int Client::make_request(struct lws *wsi, const char *message, lws_write_protoco
 
 int Client::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
     std::string rsa;
+    rapidjson::Value public_key;
+    rapidjson::Document d;
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+
+
     switch (reason) {
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
             printf("Client connected to server\n");
@@ -102,10 +131,18 @@ int Client::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
             // Generate RSA key pair
             rsa = Client::get_public_rsa_keypair();
 
-            char message[MAX_MESSAGE_LENGTH];
-            snprintf(message, MAX_MESSAGE_LENGTH, "{ \"data\": { \"type\": \"hello\", \"public_key\": \"%s\" } }", rsa.c_str());
-            make_request(wsi, message, LWS_WRITE_TEXT);
+            d.SetObject();
+            d.AddMember("type", "hello", d.GetAllocator());
+            public_key.SetString(rsa.c_str(), d.GetAllocator());
+            d.AddMember("public_key", public_key, d.GetAllocator());
 
+            d.Accept(writer);
+
+            fprintf(stderr, "Data: %s\n", buffer.GetString());
+
+            char message[MAX_MESSAGE_LENGTH];
+            strcpy(message, buffer.GetString());
+            make_request(wsi, message, LWS_WRITE_TEXT);
 
             lws_callback_on_writable(wsi);  // Request a writable event after connecting
             break;

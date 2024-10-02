@@ -13,6 +13,7 @@ class Server {
         static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
         static int add_client(std::string client);
         std::vector<std::string> list_servers();
+        int Server::client_update();
         
         static rapidjson::Document * parse_json(const char *json);
         int server_main(void);

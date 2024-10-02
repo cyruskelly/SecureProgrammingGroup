@@ -6,6 +6,7 @@
 int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
     char *received_message = (char *)in;
     rapidjson::Document * d;
+    rapidjson::Document * d_response;
     std::string rq_type;
 
     switch (reason) {
@@ -15,38 +16,13 @@ int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
             // Here you would decrypt and handle the received message
             d = parse_json(received_message);
             rq_type = (*d)["data"]["type"].GetString();
+            printf("Request type: %s\n", rq_type.c_str());
 
             if (rq_type == "hello") {
                 // Add the client to the list of clients
-                add_client(received_message);
+                add_client(d->operator[]("data")["public_key"].GetString());
 
             } else if (rq_type == "client_update") {
-                // Clients are stored as {client},\n within the file and can be multiline
-                FILE* file = fopen("/data/clients.txt", "r");
-                std::vector<std::string> clients;
-                char line[1024];
-                char client[1024];
-                while (fgets(line, 1024, file)) {
-                    if (line[0] == '{') {
-                        client[0] = '\0';
-                    } else if (line[0] == '}') {
-                        clients.push_back(client);
-                    } else {
-                        strcat(client, line);
-                    }
-                }
-                fclose(file);
-                // TODO: Format the list of clients into the following format:
-                /*
-                {
-                    "type": "client_update",
-                    "clients": [
-                        "<PEM of exported RSA public key of client>",
-                    ]
-                }
-                */
-
-                // TODO: Send the list of clients to all other servers
 
             }
             
@@ -77,7 +53,7 @@ int Server::server_main(void) {
 
     static struct lws_protocols protocols[] = {
         {"http", lws_callback_http_dummy, 0, 0},
-        {"chat-protocol", Server::callback_chat, 0, 1024},
+        {"chat-protocol", Server::callback_chat, 0, 8192},
         {NULL, NULL, 0, 0} /* terminator */
     };
 
@@ -116,9 +92,43 @@ std::vector<std::string> Server::list_servers() {
 
 
 int Server::add_client(std::string client) {
-    FILE *file = fopen("/data/clients.txt", "a");
-    fprintf(file, "{\n%s\n},\n", client.c_str());
+    FILE *file = fopen("./data/clients.txt", "a");
+    printf("File opened\n");
+    fprintf(file, "{\n%s\n}\n", client.c_str());
+    printf("Client added\n");
     fclose(file);
+    return 0;
+}
+
+int Server::client_update() {
+    // Clients are stored as {client},\n within the file and can be multiline
+    FILE* file = fopen("/data/clients.txt", "r");
+    std::vector<std::string> clients;
+    char line[1024];
+    char client[1024];
+    while (fgets(line, 1024, file)) {
+        if (line[0] == '{') {
+            client[0] = '\0';
+        } else if (line[0] == '}') {
+            clients.push_back(client);
+        } else {
+            strcat(client, line);
+        }
+    }
+    fclose(file);
+    // TODO: Format the list of clients into the following format:
+    /*
+    {
+        "type": "client_update",
+        "clients": [
+            "<PEM of exported RSA public key of client>",
+        ]
+    }
+    */
+    
+
+    // TODO: Send the list of clients to all other servers
+
 }
 
 
