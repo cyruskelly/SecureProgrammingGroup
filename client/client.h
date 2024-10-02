@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string>
+#include <vector>
 #include "encrypt.h"
 #include "../libs/libwebsockets.h"
 #include "../libs/rapidjson/document.h"
@@ -20,7 +21,7 @@ class Client {
 
         static std::string get_public_rsa_keypair();
 
-        static int make_request(struct lws *wsi, const char *message, lws_write_protocol type);
+        static int make_request(struct lws *wsi, const char *message, lws_write_protocol type, std::string chat = "");
 
         static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 

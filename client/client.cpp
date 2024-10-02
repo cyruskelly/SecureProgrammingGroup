@@ -51,7 +51,7 @@ std::string Client::get_public_rsa_keypair() {
     return rsa;
 }
 
-int Client::make_request(struct lws *wsi, const char *message, lws_write_protocol type) {
+int Client::make_request(struct lws *wsi, const char *message, lws_write_protocol type, std::string chat) {
     // Exit if the user types 'exit'
     if (strcmp(message, "exit") == 0) {
         printf("Exiting...\n");
@@ -71,6 +71,17 @@ int Client::make_request(struct lws *wsi, const char *message, lws_write_protoco
 // Assuming 'doc' is a rapidjson::Document and 'data' is a rapidjson::Value
     d_request.AddMember("data", doc, d_request.GetAllocator());
     d_request.AddMember("counter", 12345, d_request.GetAllocator());
+
+/*     if (chat.empty()) {
+        d_request.AddMember("chat", chat, d_request.GetAllocator());
+        rapidjson::Document d_chat;
+        d_chat.Parse(chat.c_str());
+        if (d_chat.HasParseError()) {
+            printf("Error parsing JSON chat message\n");
+            return -1;
+        }
+        d_request.AddMember("chat", d_chat, d_request.GetAllocator());
+    } */
 
     std::string signature;
 
@@ -106,8 +117,10 @@ int Client::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
     std::string rsa;
     rapidjson::Value public_key;
     rapidjson::Document d;
+    // rapidjson::Document d2;
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    // std::vector <std::string> a;
 
 
     switch (reason) {
@@ -150,16 +163,62 @@ int Client::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
             {
                 // Read user input from the terminal
                 char message[MAX_MESSAGE_LENGTH];
+                bool message_public = false; // TODO: set based on user input
                 printf("Enter message (or type 'exit' to quit): ");
                 fgets(message, MAX_MESSAGE_LENGTH, stdin);
-                
+
                 // Remove the newline character from the input
                 message[strcspn(message, "\n")] = 0;
 
-                // Encrypt the message using the RSA public key
+/*                 if (message_public) {
+                    // TODO: Create a destination server vector based on user input and set values to the array named 'a', ask copilot for guidance on this
+                    
+                    // d.SetObject();
+                    // d.AddMember("type", "chat", d.GetAllocator());
+                    // d.AddMember("destination_servers", a, d.GetAllocator());
 
-                // Send the message to the server
-                make_request(wsi, message, LWS_WRITE_TEXT);
+                    // TODO: Create a symmetric key vector and set values to the array named 'a', ask copilot for guidance on this
+
+                    // d.AddMember("iv", "iv", d.GetAllocator());
+                    // d.AddMember("symm_keys", a, d.GetAllocator());
+
+                    // TODO: Encrypt the message using the symmetric key and set the value to the variable named 'message'
+
+                    // TODO: Create a destination RSA public key vector and set values to the array named 'a', ask copilot for guidance on this
+
+                    d2.SetObject();
+                    // d2.AddMember("participants", a, d2.GetAllocator());
+
+                    rapidjson::Value messageValue;
+                    messageValue.SetString(message, d2.GetAllocator());
+                    d2.AddMember("message", messageValue, d2.GetAllocator());
+
+                    rapidjson::StringBuffer buffer;
+                    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+                    // d.Accept(writer);
+
+                    // make_request(wsi, buffer.GetString(), LWS_WRITE_TEXT);
+
+                } else {
+                    d.SetObject();
+                    d.AddMember("type", "public_chat", d.GetAllocator());
+
+                    // Convert std::string to rapidjson::Value
+                    rapidjson::Value fingerprintValue;
+                    std::string fingerprint = get_public_rsa_keypair();
+                    fingerprintValue.SetString(fingerprint.c_str(), d.GetAllocator());
+                    d.AddMember("fingerprint", fingerprintValue, d.GetAllocator());
+
+                    rapidjson::Value messageValue;
+                    messageValue.SetString(message, d.GetAllocator());
+                    d.AddMember("message", messageValue, d.GetAllocator());
+
+                    rapidjson::StringBuffer buffer;
+                    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+                    d.Accept(writer);
+
+                    make_request(wsi, buffer.GetString(), LWS_WRITE_TEXT);
+                } */
             }
             break;
 
