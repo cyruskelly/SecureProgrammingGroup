@@ -109,13 +109,18 @@ void Server::send_client_update_to_servers() {
 }
 
 std::vector<std::string> Server::read_clients() {
-    std::ifstream file("/data/clients.txt");
+    std::ifstream file("./data/clients.txt");
     std::string line;
     std::vector<std::string> clients;
+    std::string client;
 
     while (std::getline(file, line)) {
-        if (!line.empty()) {
-            clients.push_back(line);
+        if (line[0] == '{') {
+            client = "";
+        } else if (line[0] == '}') {
+            clients.push_back(client);
+        } else {
+            client += line;
         }
     }
     return clients;
@@ -166,10 +171,10 @@ static struct lws_protocols protocols[] = {
 }
 
 std::vector<std::string> Server::list_servers() {
-    FILE *file = fopen("/data/servers.txt", "r");
+    FILE *file = fopen("./data/servers.txt", "r");
     if (!file) {
         printf("Error: Could not open servers.txt\n");
-        return {}; // Return an empty vector
+        return std::vector<std::string>(); // Return an empty vector
     }
     
     char line[1024];
@@ -187,12 +192,16 @@ std::vector<std::string> Server::list_servers() {
 }
 
 
-
 int Server::add_client(std::string client) {
+    std::vector<std::string> client_list = read_clients();
+    for (std::string c : client_list) {
+        if (c == client) {
+            return 0;
+        }
+    }
+
     FILE *file = fopen("./data/clients.txt", "a");
-    printf("File opened\n");
     fprintf(file, "{\n%s\n}\n", client.c_str());
-    printf("Client added\n");
     fclose(file);
     return 0;
 }
