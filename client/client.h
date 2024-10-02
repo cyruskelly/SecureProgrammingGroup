@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string>
 #include "encrypt.h"
-#include "../libs/libwebsockets.h"
+#include <libwebsockets.h>
 //#include "../libs/base64.hpp"
 
 

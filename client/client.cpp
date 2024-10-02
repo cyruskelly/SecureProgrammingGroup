@@ -42,7 +42,7 @@ std::string Client::get_public_rsa_keypair() {
         fprintf(stderr, "Public key file not found\n");
         Client::get_private_rsa_keypair();
         fprintf(stderr, "Private key pair generated\n");
-        FILE* fp = fopen("./data/public.pem", "r");
+        fp = fopen("./data/public.pem", "r");
     
     }
     
@@ -53,6 +53,7 @@ std::string Client::get_public_rsa_keypair() {
     fclose(fp);
     std::string rsaString(rsa);
     delete[] rsa;
+    delete[] temp;
     return trim(rsaString);
 }
 
@@ -82,6 +83,7 @@ int Client::make_request(struct lws *wsi, const char *message, lws_write_protoco
 
     // Request the WebSocket to be writable again for the next message
     lws_callback_on_writable(wsi);
+    return 0;
 }
 
 int Client::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
