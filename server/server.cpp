@@ -47,13 +47,10 @@ int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
 
             if (rq_type == "hello") {
                 // Add the client to the list of clients
-                add_client(d->operator[]("data")["public_key"].GetString());
-
-            }
+                server_instance->add_client((*d)["data"]["public_key"].GetString());
             } else if (rq_type == "client_update") {
                 server_instance->send_client_update_to_servers();  // Use server_instance
             }
-            break;
 
         case LWS_CALLBACK_ESTABLISHED:
             printf("Client connected\n");
