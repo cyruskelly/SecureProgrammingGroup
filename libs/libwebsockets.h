@@ -582,27 +582,29 @@ struct lws_vhost;
 struct lws;
 
 #include <libwebsockets/lws-dll2.h>
-#include <libwebsockets/lws-map.h>
 
-#include <libwebsockets/lws-fault-injection.h>
-#include <libwebsockets/lws-timeout-timer.h>
-#include <libwebsockets/lws-cache-ttl.h>
+#include "../libs/libwebsockets/lws-map.h"
+
+#include "../libs/libwebsockets/lws-fault-injection.h"
+#include "../libs/libwebsockets/lws-timeout-timer.h"
+#include "../libs/libwebsockets/lws-cache-ttl.h"
 #if defined(LWS_WITH_SYS_SMD)
 #include <libwebsockets/lws-smd.h>
 #endif
-#include <libwebsockets/lws-state.h>
-#include <libwebsockets/lws-retry.h>
-#include <libwebsockets/lws-adopt.h>
-#include <libwebsockets/lws-network-helper.h>
-#include <libwebsockets/lws-metrics.h>
-#include <libwebsockets/lws-system.h>
-#include <libwebsockets/lws-ws-close.h>
-#include <libwebsockets/lws-callbacks.h>
-#include <libwebsockets/lws-ws-state.h>
-#include <libwebsockets/lws-ws-ext.h>
-#include <libwebsockets/lws-protocols-plugins.h>
 
-#include <libwebsockets/lws-context-vhost.h>
+#include "../libs/libwebsockets/lws-state.h"
+#include "../libs/libwebsockets/lws-retry.h"
+#include "../libs/libwebsockets/lws-adopt.h"
+#include "../libs/libwebsockets/lws-network-helper.h"
+#include "../libs/libwebsockets/lws-metrics.h"
+#include "../libs/libwebsockets/lws-system.h"
+#include "../libs/libwebsockets/lws-ws-close.h"
+#include "../libs/libwebsockets/lws-callbacks.h"
+#include "../libs/libwebsockets/lws-ws-state.h"
+#include "../libs/libwebsockets/lws-ws-ext.h"
+#include "../libs/libwebsockets/lws-protocols-plugins.h"
+
+#include "../libs/libwebsockets/lws-context-vhost.h"
 
 #if defined(LWS_WITH_CONMON)
 #include <libwebsockets/lws-conmon.h>
@@ -611,37 +613,40 @@ struct lws;
 #if defined(LWS_ROLE_MQTT)
 #include <libwebsockets/lws-mqtt.h>
 #endif
-#include <libwebsockets/lws-client.h>
-#include <libwebsockets/lws-http.h>
-#include <libwebsockets/lws-spa.h>
-#include <libwebsockets/lws-purify.h>
-#include <libwebsockets/lws-misc.h>
-#include <libwebsockets/lws-dsh.h>
-#include <libwebsockets/lws-service.h>
-#include <libwebsockets/lws-write.h>
-#include <libwebsockets/lws-writeable.h>
-#include <libwebsockets/lws-ring.h>
-#include <libwebsockets/lws-sha1-base64.h>
-#include <libwebsockets/lws-x509.h>
-#include <libwebsockets/lws-cgi.h>
+
+#include "../libs/libwebsockets/lws-client.h"
+#include "../libs/libwebsockets/lws-http.h"
+#include "../libs/libwebsockets/lws-spa.h"
+#include "../libs/libwebsockets/lws-purify.h"
+#include "../libs/libwebsockets/lws-misc.h"
+#include "../libs/libwebsockets/lws-dsh.h"
+#include "../libs/libwebsockets/lws-service.h"
+#include "../libs/libwebsockets/lws-write.h"
+#include "../libs/libwebsockets/lws-writeable.h"
+#include "../libs/libwebsockets/lws-ring.h"
+#include "../libs/libwebsockets/lws-sha1-base64.h"
+#include "../libs/libwebsockets/lws-x509.h"
+#include "../libs/libwebsockets/lws-cgi.h"
+
 #if defined(LWS_WITH_FILE_OPS)
 #include <libwebsockets/lws-vfs.h>
 #endif
-#include <libwebsockets/lws-gencrypto.h>
 
-#include <libwebsockets/lws-lejp.h>
-#include <libwebsockets/lws-lecp.h>
-#include <libwebsockets/lws-cose.h>
-#include <libwebsockets/lws-struct.h>
-#include <libwebsockets/lws-threadpool.h>
-#include <libwebsockets/lws-tokenize.h>
-#include <libwebsockets/lws-lwsac.h>
-#include <libwebsockets/lws-fts.h>
-#include <libwebsockets/lws-diskcache.h>
-#include <libwebsockets/lws-sequencer.h>
-#include <libwebsockets/lws-secure-streams.h>
-#include <libwebsockets/lws-secure-streams-policy.h>
-#include <libwebsockets/lws-secure-streams-client.h>
+#include "../libs/libwebsockets/lws-gencrypto.h"
+
+#include "../libs/libwebsockets/lws-lejp.h"
+#include "../libs/libwebsockets/lws-lecp.h"
+#include "../libs/libwebsockets/lws-cose.h"
+#include "../libs/libwebsockets/lws-struct.h"
+#include "../libs/libwebsockets/lws-threadpool.h"
+#include "../libs/libwebsockets/lws-tokenize.h"
+#include "../libs/libwebsockets/lws-lwsac.h"
+#include "../libs/libwebsockets/lws-fts.h"
+#include "../libs/libwebsockets/lws-diskcache.h"
+#include "../libs/libwebsockets/lws-sequencer.h"
+#include "../libs/libwebsockets/lws-secure-streams.h"
+#include "../libs/libwebsockets/lws-secure-streams-policy.h"
+#include "../libs/libwebsockets/lws-secure-streams-client.h"
 
 #if !defined(LWS_PLAT_FREERTOS)
 #include <libwebsockets/abstract/abstract.h>
@@ -652,7 +657,7 @@ struct lws;
 
 #if defined(LWS_WITH_TLS)
 
-#include <libwebsockets/lws-tls-sessions.h>
+#include "../libs/libwebsockets/lws-tls-sessions.h"
 
 #if defined(LWS_WITH_MBEDTLS)
 #include <mbedtls/md5.h>
@@ -673,20 +678,20 @@ struct lws;
 
 #endif
 
-#include <libwebsockets/lws-eventlib-exports.h>
-#include <libwebsockets/lws-i2c.h>
-#include <libwebsockets/lws-spi.h>
-#include <libwebsockets/lws-gpio.h>
-#include <libwebsockets/lws-bb-i2c.h>
-#include <libwebsockets/lws-bb-spi.h>
-#include <libwebsockets/lws-button.h>
-#include <libwebsockets/lws-led.h>
-#include <libwebsockets/lws-pwm.h>
-#include <libwebsockets/lws-display.h>
-#include <libwebsockets/lws-ssd1306-i2c.h>
-#include <libwebsockets/lws-ili9341-spi.h>
-#include <libwebsockets/lws-settings.h>
-#include <libwebsockets/lws-netdev.h>
+#include "../libs/libwebsockets/lws-eventlib-exports.h"
+#include "../libs/libwebsockets/lws-i2c.h"
+#include "../libs/libwebsockets/lws-spi.h"
+#include "../libs/libwebsockets/lws-gpio.h"
+#include "../libs/libwebsockets/lws-bb-i2c.h"
+#include "../libs/libwebsockets/lws-bb-spi.h"
+#include "../libs/libwebsockets/lws-button.h"
+#include "../libs/libwebsockets/lws-led.h"
+#include "../libs/libwebsockets/lws-pwm.h"
+#include "../libs/libwebsockets/lws-display.h"
+#include "../libs/libwebsockets/lws-ssd1306-i2c.h"
+#include "../libs/libwebsockets/lws-ili9341-spi.h"
+#include "../libs/libwebsockets/lws-settings.h"
+#include "../libs/libwebsockets/lws-netdev.h"
 
 #ifdef __cplusplus
 }
