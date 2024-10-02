@@ -3,7 +3,9 @@
 #include <string>
 #include <cstring>
 #include <fstream>
-#include "../libs/libwebsockets.h"
+#include <algorithm>
+#include <cctype>
+#include <libwebsockets.h>
 #include "../libs/rapidjson/document.h"
 #include "../libs/trim.h"
 
@@ -44,4 +46,27 @@ class Server {
         // Main server function
         int server_main(void);
 
+        private:
+        void update_servers_list() {
+            std::ofstream servers_file("servers.txt", std::ios::app); // Open servers.txt in append mode
+            if (servers_file.is_open()) {
+                servers_file << server_address << ":" << server_port << "\n"; // Write the server address and port
+                servers_file.close();
+            } else {
+                std::cerr << "Error: Could not open servers.txt to update server list." << std::endl;
+            }
+        }
+
+        std::string trim(const std::string& str) {
+        
+            auto start = std::find_if_not(str.begin(), str.end(), [](unsigned char ch) {
+                return std::isspace(ch);
+            });
+
+            auto end = std::find_if_not(str.rbegin(), str.rend(), [](unsigned char ch) {
+                return std::isspace(ch);
+            }).base();
+
+            return (start < end ? std::string(start, end) : std::string());
+        }
 };

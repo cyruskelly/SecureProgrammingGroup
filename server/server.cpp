@@ -249,16 +249,18 @@ void Server::relay_message_to_server(const std::string &message, lws *wsi) {
 int Server::server_main(void) {
     std::cout << "Enter server address: ";
     std::cin >> server_address;
-    
-    printf("Enter port: ");
+
+    std::cout << "Enter port: ";
     std::cin >> server_port;
+
+    // Update the servers list with the new server
+    update_servers_list();
 
     static struct lws_protocols protocols[] = {
         {"http", lws_callback_http_dummy, 0, 0},
         {"chat-protocol", Server::callback_chat, 0, 8192},
         {"server-protocol", Server::callback_server, 0, 8192},
-
-        {NULL, NULL, 0, 0} /* terminator */
+        {NULL, NULL, 0, 0} // terminator
     };
 
     struct lws_context_creation_info info;
@@ -266,17 +268,20 @@ int Server::server_main(void) {
     info.port = server_port;
     info.protocols = protocols;
 
-    
     struct lws_context *context = lws_create_context(&info);
     if (!context) {
-        printf("Failed to create WebSocket context\n");
+        std::cerr << "Failed to create WebSocket context" << std::endl;
         return 1;
     }
-    
-    printf("Server started on port %i\n", server_port);
 
-    connect_to_other_servers(context);
-    
+    std::cout << "Server started on port " << server_port << std::endl;
+
+    // Check if there is more than one server in the list before attempting connections
+    std::vector<std::string> servers = list_servers();
+    if (servers.size() > 1) {
+        connect_to_other_servers(context); // Only connect if there's more than 1 server
+    }
+
     while (1) {
         lws_service(context, 5000);
     }
@@ -286,23 +291,26 @@ int Server::server_main(void) {
 }
 
 std::vector<std::string> Server::list_servers() {
-    FILE *file = fopen("./data/servers.txt", "r");
-    if (!file) {
-        printf("Error: Could not open servers.txt\n");
-        return std::vector<std::string>(); // Return an empty vector
-    }
-    
-    char line[1024];
+    std::ifstream file("servers.txt");
+    std::string line;
     std::vector<std::string> servers;
-    while (fgets(line, sizeof(line), file)) {
-        // Remove trailing newlines and whitespaces 
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n') {
-            line[len - 1] = '\0';
-        }
-        servers.push_back(line);
+
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open servers.txt" << std::endl;
+        return servers;
     }
-    fclose(file);
+
+    while (std::getline(file, line)) {
+        // Trim leading/trailing whitespaces and skip empty lines
+        line = trim(line);  // Trim whitespaces using the custom `trim()` function
+
+        if (!line.empty()) {  // Only process non-empty lines
+            servers.push_back(line);
+            std::cout << "Found server: " << line << std::endl;  // Debugging log to verify the server being added
+        }
+    }
+
+    file.close();
     return servers;
 }
 
