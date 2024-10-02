@@ -2,12 +2,6 @@
 
 #define MAX_MESSAGE_LENGTH 8192
 
-std::string trim(const std::string& line) {
-    const char* WhiteSpace = " \t\v\r\n";
-    std::size_t end = line.find_last_not_of(WhiteSpace);
-    return line.substr(0, end + 1);
-}
-
 
 RSA* Client::get_private_rsa_keypair() {
     RSA* rsa = nullptr; // Declare and initialize 'rsa' variable
@@ -208,7 +202,7 @@ int Client::client_main(void) {
 
     // Run the WebSocket service loop
     while (1) {
-        lws_service(context, 1000);  // Service the WebSocket connection
+        lws_service(context, 5000);  // Service the WebSocket connection
     }
 
     lws_context_destroy(context);

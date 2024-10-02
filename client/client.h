@@ -5,6 +5,7 @@
 #include "../libs/rapidjson/document.h"
 #include "../libs/rapidjson/writer.h"
 #include "../libs/rapidjson/stringbuffer.h"
+#include "../libs/trim.h"
 //#include "../libs/base64.hpp"
 
 
