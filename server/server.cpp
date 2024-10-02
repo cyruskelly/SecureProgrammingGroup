@@ -1,17 +1,21 @@
 #include "server.h"
 #include <iostream>
 
-int Server::callback_server(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
-     // Cast user to Server* to call non-static member functions
-    Server *server_instance = static_cast<Server *>(user);  // Assuming user data points to a Server instance
+Server *global_server = nullptr;
 
+int Server::callback_server(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
+    Server *server_instance = global_server; // Use server instance for non-static calls
     char *received_message = (char *)in;
     switch (reason) {
         case LWS_CALLBACK_RECEIVE:
             received_message[len] = '\0';
             printf("Message received from another server: %s\n", received_message);
-            // Use server_instance to call non-static methods
-            server_instance->relay_message_to_servers(received_message);
+            // Validate signature and counter
+            if (server_instance->validate_signature(received_message)) {
+                server_instance->relay_message_to_servers(received_message); // Securely forward message
+            } else {
+                printf("Invalid message: Signature or counter check failed\n");
+            }
             break;
 
         case LWS_CALLBACK_ESTABLISHED:
@@ -29,26 +33,24 @@ int Server::callback_server(struct lws *wsi, enum lws_callback_reasons reason, v
 }
 
 int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
-    Server *server_instance = static_cast<Server *>(user);
-
+    Server *server_instance = global_server;
     char *received_message = (char *)in;
     rapidjson::Document *d;
     std::string rq_type;
 
     switch (reason) {
         case LWS_CALLBACK_RECEIVE:
-            received_message[len] = '\0';  // Make sure to null-terminate the message
+            received_message[len] = '\0';
             printf("Message received: %s\n", received_message);
-            // Here you would decrypt and handle the received message
             d = parse_json(received_message);
             rq_type = (*d)["data"]["type"].GetString();
 
             if (rq_type == "hello") {
-                // Add the client to the list of clients
-                server_instance->add_client(received_message);  // Use server_instance
+                server_instance->add_client(received_message);
+                server_instance->send_client_update_to_servers();  // Send client updates after new connections
 
             } else if (rq_type == "client_update") {
-                server_instance->send_client_update_to_servers();  // Use server_instance
+                server_instance->send_client_update_to_servers();  // Use the updated method
             }
             break;
 
@@ -58,6 +60,7 @@ int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
 
         case LWS_CALLBACK_CLOSED:
             printf("Client disconnected\n");
+            server_instance->send_client_update_to_servers();  // Handle disconnection and notify other servers
             break;
 
         default:
@@ -92,30 +95,41 @@ void Server::connect_to_other_servers(struct lws_context *context) {
 
 void Server::send_client_update_to_servers() {
     // Read clients from the file
-    std::vector<std::string> clients = read_clients();
+    std::unordered_map<std::string, std::string> clients = read_clients();
     
     // Format the list of clients as JSON
     std::string client_update = "{ \"type\": \"client_update\", \"clients\": [";
-    for (size_t i = 0; i < clients.size(); i++) {
-        client_update += "\"" + clients[i] + "\"";
-        if (i < clients.size() - 1) {
+    
+    bool first = true; // To handle the comma correctly
+    for (const auto& client : clients) {
+        if (!first) {
             client_update += ", ";
         }
+        client_update += "\"" + client.second + "\""; // client.second is the public key
+        first = false;
     }
+    
     client_update += "] }";
 
     // Send the list of clients to all other servers
     relay_message_to_servers(client_update);
 }
 
-std::vector<std::string> Server::read_clients() {
+
+std::unordered_map<std::string, std::string> Server::read_clients() {
     std::ifstream file("/data/clients.txt");
     std::string line;
-    std::vector<std::string> clients;
+    std::unordered_map<std::string, std::string> clients;
 
     while (std::getline(file, line)) {
         if (!line.empty()) {
-            clients.push_back(line);
+            // Assuming each line is formatted as "fingerprint:public_key"
+            size_t separator = line.find(':');
+            if (separator != std::string::npos) {
+                std::string fingerprint = line.substr(0, separator);
+                std::string public_key = line.substr(separator + 1);
+                clients[fingerprint] = public_key;
+            }
         }
     }
     return clients;
@@ -202,7 +216,84 @@ int Server::add_client(std::string client) {
 }
 
 
+bool Server::validate_signature(const char *message) {
+    rapidjson::Document *d = parse_json(message);
+    std::string signature_base64 = (*d)["signature"].GetString();
+    std::string data = (*d)["data"].GetString();
+    std::string sender_fingerprint = (*d)["sender_fingerprint"].GetString();
+
+    // Get the map of clients (fingerprints -> public keys)
+    std::unordered_map<std::string, std::string> clients = read_clients();
+
+    // Find the sender's public key using their fingerprint
+    if (clients.find(sender_fingerprint) == clients.end()) {
+        printf("Error: Could not find sender's public key\n");
+        return false;
+    }
+
+    std::string public_key_pem = clients[sender_fingerprint];
+
+    // Decode the Base64 signature
+    unsigned char signature[256]; // RSA 2048-bit signature size
+    int signature_len = EVP_DecodeBlock(signature, (const unsigned char*)signature_base64.c_str(), signature_base64.length());
+
+    if (signature_len <= 0) {
+        printf("Error: Failed to decode signature\n");
+        return false;
+    }
+
+    // Hash the data (data only, no counter involved)
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((unsigned char*)data.c_str(), data.length(), hash);
+
+    // Convert the PEM public key string to EVP_PKEY
+    BIO* bio = BIO_new_mem_buf(public_key_pem.c_str(), -1);
+    EVP_PKEY* public_key = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+
+    if (!public_key) {
+        printf("Error: Could not load public key\n");
+        return false;
+    }
+
+    // Verify the RSA-PSS signature using the sender's public key
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    EVP_PKEY_CTX *pkey_ctx;
+    if (EVP_DigestVerifyInit(ctx, &pkey_ctx, EVP_sha256(), NULL, public_key) <= 0) {
+        printf("Error: Failed to initialize signature verification\n");
+        EVP_MD_CTX_free(ctx);
+        return false;
+    }
+
+    if (EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PSS_PADDING) <= 0 ||
+        EVP_PKEY_CTX_set_rsa_pss_saltlen(pkey_ctx, 32) <= 0) {
+        printf("Error: Failed to configure PSS padding\n");
+        EVP_MD_CTX_free(ctx);
+        return false;
+    }
+
+    if (EVP_DigestVerify(ctx, signature, signature_len, hash, SHA256_DIGEST_LENGTH) == 1) {
+        printf("Signature valid!\n");
+        EVP_MD_CTX_free(ctx);
+        EVP_PKEY_free(public_key);
+        return true;
+    } else {
+        printf("Signature invalid!\n");
+        EVP_MD_CTX_free(ctx);
+        EVP_PKEY_free(public_key);
+        return false;
+    }
+}
+
+/*
+bool Server::check_counter(const char *message) {
+    // Code to verify if the message counter is greater than the last received counter
+    // Returns true if valid, false otherwise
+}
+*/
+
 int main() {
+    printf("Working");
     Server server;
     server.server_main();
     return 0;

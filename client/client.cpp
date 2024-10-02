@@ -9,33 +9,29 @@ std::string trim(const std::string& line) {
 }
 
 
-RSA* Client::get_private_rsa_keypair() {
-    RSA* rsa = nullptr; // Declare and initialize 'rsa' variable
+EVP_PKEY* Client::get_private_rsa_keypair() {
+    EVP_PKEY* pkey = nullptr;  // Declare and initialize 'pkey' variable
 
     FILE* fp = fopen("./data/private.pem", "r");
     if (fp == NULL) {
-
-        rsa = generate_rsa_keypair(); // Assign value to 'rsa'
+        pkey = generate_rsa_keypair();  // Assign value to 'pkey'
         fprintf(stderr, "RSA key pair generated\n");
-        save_rsa_private_key(rsa, "./data/private.pem");
+        save_rsa_private_key(pkey, "./data/private.pem");
         fprintf(stderr, "Private key pair saved\n");
-        save_rsa_public_key(rsa, "./data/public.pem");
-
+        save_rsa_public_key(pkey, "./data/public.pem");
     } else {
         fclose(fp);
-
-        fp = fopen("./data/private.pem", "r");
-        rsa = PEM_read_RSAPrivateKey(fp, NULL, NULL, NULL); // Assign value to 'rsa'
-        fclose(fp);
+        BIO* bio = BIO_new_file("./data/private.pem", "r");
+        pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);  // Assign value to 'pkey'
+        BIO_free(bio);
     }
-
-    return rsa;
+    return pkey;
 }
 
 std::string Client::get_public_rsa_keypair() {
-    char* rsa = new char[1024]; // Declare and initialize 'rsa' variable as a pointer
-    char *temp = new char[1024]; // Declare and initialize 'temp' variable as a pointer
-    
+    char* rsa = new char[1024];  // Declare and initialize 'rsa' variable as a pointer
+    char* temp = new char[1024];  // Declare and initialize 'temp' variable as a pointer
+
     FILE* fp = fopen("./data/public.pem", "r");
     fprintf(stderr, "Public key file opened\n");
     if (fp == NULL) {
@@ -43,14 +39,16 @@ std::string Client::get_public_rsa_keypair() {
         Client::get_private_rsa_keypair();
         fprintf(stderr, "Private key pair generated\n");
         fp = fopen("./data/public.pem", "r");
-    
     }
-    
-    while(fgets(temp, 100, fp)) {
-        strcat(rsa, temp);
+
+    if (fp) {
+        while (fgets(temp, 100, fp)) {
+            strcat(rsa, temp);
+        }
+        fclose(fp);
     }
+
     fprintf(stderr, "Public key: %s\n", rsa);
-    fclose(fp);
     std::string rsaString(rsa);
     delete[] rsa;
     delete[] temp;
@@ -65,24 +63,40 @@ int Client::make_request(struct lws *wsi, const char *message, lws_write_protoco
         return -1;
     }
 
-    std::string request = strcat(strcat("\"type\": \"signed_data\", \"data\": ", message), "\"counter\": 12345, \"signature\": ");
+    static int counter = 0;
+    counter++;
 
-    // TODO [Raiyan]: Update below line to use base64 encoding for the signature
-    request = request + get_public_rsa_keypair() + "12345";
+    std::string rsa_key = get_public_rsa_keypair();
+
+    // Base64 encode the RSA key
+    unsigned char *base64_encoded_key = new unsigned char[rsa_key.length() * 2]; // Allocate sufficient space
+    int encoded_length = EVP_EncodeBlock(base64_encoded_key, reinterpret_cast<const unsigned char*>(rsa_key.c_str()), rsa_key.length());
+
+    if (encoded_length < 0) {
+        printf("Failed to base64 encode the RSA key\n");
+        delete[] base64_encoded_key;
+        return -1;
+    }
+
+    // Add the Base64 encoded signature to the request
+    std::string signature(reinterpret_cast<char*>(base64_encoded_key), encoded_length);
+    std::string request = "{\"type\": \"signed_data\", \"data\": \"" + std::string(message) + "\", \"counter\": \"12345\", \"signature\": \"" + signature + "\"}";
 
     // Prepare buffer with the required padding
     unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + MAX_MESSAGE_LENGTH + LWS_SEND_BUFFER_POST_PADDING];
     memset(buf, 0, sizeof(buf)); // Clear the buffer
 
-    size_t n = strlen(message);
-    memcpy(buf + LWS_SEND_BUFFER_PRE_PADDING, message, n);  // Copy the message into the buffer
+    size_t n = request.size();
+    memcpy(buf + LWS_SEND_BUFFER_PRE_PADDING, request.c_str(), n);  // Copy the **request** into the buffer
 
     // Send the message over WebSocket
     lws_write(wsi, buf + LWS_SEND_BUFFER_PRE_PADDING, n, type);
-    printf("Sending message: %s\n", message);
+    printf("Sending message: %s\n", request.c_str());  // Print the full request
 
     // Request the WebSocket to be writable again for the next message
     lws_callback_on_writable(wsi);
+
+    delete[] base64_encoded_key;  // Free the allocated buffer
     return 0;
 }
 

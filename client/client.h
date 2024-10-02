@@ -12,7 +12,7 @@
 class Client {
 
     public:
-        static RSA* get_private_rsa_keypair();
+        static EVP_PKEY* get_private_rsa_keypair();
 
         static std::string get_public_rsa_keypair();
 
