@@ -14,6 +14,11 @@ class Server {
     public:
         std::vector<std::string> client_list;
         std::vector<struct lws *> connected_servers;  // Declare connected servers
+        struct serv {
+            std::string address;
+            std::vector<std::string> clients;
+        };
+        std::vector<serv> servers;
         
         // Static callback functions
         static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);

@@ -4,14 +4,38 @@
 int Server::callback_server(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
      // Cast user to Server* to call non-static member functions
     Server *server_instance = static_cast<Server *>(user);  // Assuming user data points to a Server instance
+    rapidjson::Document * d;
+    std::string rq_type;
 
     char *received_message = (char *)in;
     switch (reason) {
         case LWS_CALLBACK_RECEIVE:
             received_message[len] = '\0';
             printf("Message received from another server: %s\n", received_message);
-            // Use server_instance to call non-static methods
-            server_instance->relay_message_to_servers(received_message);
+            d = parse_json(received_message);
+            rq_type = (*d)["type"].GetString();
+            printf("Request type: %s\n", rq_type.c_str());
+
+            if (rq_type == "client_update") {
+                for (const auto &client : (*d)["clients"].GetArray()) {
+                    for (serv s : server_instance->servers) {
+                        if (s.address == client) {
+                            s.clients.push_back(client.GetString());
+                        }
+                    }
+                }
+                
+            } else if (rq_type == "client_update_request") {
+                // Relay the message to all other servers
+                server_instance->relay_message_to_servers(received_message);
+            } else if (rq_type == "signed_data") {
+                if ((*d)["data"]["type"].GetString() == "server_hello") {
+                    // Add the server to the list of connected servers
+                    server_instance->connected_servers.push_back(wsi);
+                    server_instance->servers.push_back({(*d)["data"]["sender"].GetString(), {}});
+                }
+            }
+
             break;
 
         case LWS_CALLBACK_ESTABLISHED:
@@ -50,7 +74,7 @@ int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, voi
                 server_instance->add_client((*d)["data"]["public_key"].GetString());
             } else if (rq_type == "client_update") {
                 server_instance->send_client_update_to_servers();  // Use server_instance
-            }
+            } 
 
         case LWS_CALLBACK_ESTABLISHED:
             printf("Client connected\n");
@@ -145,6 +169,7 @@ int Server::server_main(void) {
 static struct lws_protocols protocols[] = {
         {"http", lws_callback_http_dummy, 0, 0},
         {"chat-protocol", Server::callback_chat, 0, 8192},
+        {"server-protocol", Server::callback_server, 0, 8192},
         {NULL, NULL, 0, 0} /* terminator */
     };
 
