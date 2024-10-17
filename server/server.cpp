@@ -143,44 +143,43 @@ void Server::server_hello(lws *wsi) {
 void Server::connect_to_other_servers(struct lws_context *context) {
     std::vector<std::string> servers = list_servers();  // List of known servers
     std::string addr;
-    int port;
+    int port = 8080; // Default port
 
     for (const auto &server : servers) {
-        port = 8080;
-        for (size_t i = 0; i < server.size(); i++) {
-            if (server[i] == ':') {
-                addr = server.substr(0, i);
-                port = std::stoi(server.substr(i + 1));
-                break;
-            }
+        size_t colon_pos = server.find(':');
+        if (colon_pos != std::string::npos) {
+            addr = server.substr(0, colon_pos);
+            port = std::stoi(server.substr(colon_pos + 1));
+        } else {
+            addr = server;
         }
+
         if (addr == server_address && port == server_port) {
             continue;
         }
+
         struct lws_client_connect_info ccinfo = {0};
         ccinfo.context = context;
-        ccinfo.address = addr.c_str();  // Server address from the list
-        ccinfo.port = port;               // Ensure matching port
+        ccinfo.address = addr.c_str();
+        ccinfo.port = port;
         ccinfo.path = "/";
         ccinfo.protocol = "server-protocol";
         ccinfo.host = lws_canonical_hostname(context);
         ccinfo.origin = "origin";
         ccinfo.ietf_version_or_minus_one = -1;
-
-        ccinfo.userdata = this;  // Pass the Server instance to the callback function
         ccinfo.ssl_connection = 0;
+        ccinfo.userdata = this;
 
         struct lws *wsi = lws_client_connect_via_info(&ccinfo);
         if (wsi == NULL) {
             printf("Failed to connect to server: %s\n", server.c_str());
-            continue;
         } else {
             printf("Connected to server: %s\n", server.c_str());
-            sleep(3);
-            server_hello(wsi);
+            server_hello(wsi);  // Send hello once connected
         }
     }
 }
+
 
 void Server::send_client_update_to_server(struct lws* server) {
     // Read clients from the file
@@ -246,15 +245,111 @@ void Server::relay_message_to_server(const std::string &message, lws *wsi) {
     }
 }
 
+void Server::broadcast_discovery_message() {
+    int sock;
+    struct sockaddr_in broadcast_addr;
+    std::string message = "{ \"data\": { \"type\": \"server_hello\", \"sender\": \"" + server_address + ":" + std::to_string(server_port) + "\" } }";
+    int broadcast = 1;
+
+    // Create a socket for broadcasting
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return;
+    }
+
+    // Set socket options to enable broadcast
+    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
+        perror("setsockopt");
+        return;
+    }
+
+    // Define the broadcast address
+    memset(&broadcast_addr, 0, sizeof(broadcast_addr));
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    broadcast_addr.sin_port = htons(12345);  // The broadcast port
+
+    // Send the broadcast message
+    if (sendto(sock, message.c_str(), message.length(), 0, (struct sockaddr *)&broadcast_addr, sizeof(broadcast_addr)) < 0) {
+        perror("sendto");
+    } else {
+        printf("Broadcast message sent: %s\n", message.c_str());
+    }
+
+    close(sock);
+}
+
+void Server::listen_for_broadcasts() {
+    int sock;
+    struct sockaddr_in recv_addr;
+    socklen_t addr_len;
+    char buffer[1024];
+
+    // Create a socket to listen for UDP messages
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return;
+    }
+
+    // Bind the socket to all interfaces and the broadcast port
+    memset(&recv_addr, 0, sizeof(recv_addr));
+    recv_addr.sin_family = AF_INET;
+    recv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    recv_addr.sin_port = htons(12345);
+
+    if (bind(sock, (struct sockaddr *)&recv_addr, sizeof(recv_addr)) < 0) {
+        perror("bind");
+        return;
+    }
+
+    while (true) {
+        // Listen for broadcast messages
+        addr_len = sizeof(recv_addr);
+        if (recvfrom(sock, buffer, sizeof(buffer), 0, (struct sockaddr *)&recv_addr, &addr_len) < 0) {
+            perror("recvfrom");
+            continue;
+        }
+
+        // Parse and handle the received message
+        rapidjson::Document *d = parse_json(buffer);
+        std::string type = (*d)["data"]["type"].GetString();
+        if (type == "server_hello") {
+            std::string sender = (*d)["data"]["sender"].GetString();
+            printf("Received server_hello from %s\n", sender.c_str());
+
+            // Add the discovered server to the list of known servers
+            servers.push_back({sender, std::vector<std::string>()});
+        }
+    }
+
+    close(sock);
+}
+
+
 int Server::server_main(void) {
-    std::cout << "Enter server address: ";
-    std::cin >> server_address;
+    // Get the dynamic private IP address like in the Python script
+    server_address = get_active_private_ip();
+    if (server_address.empty()) {
+        std::cerr << "Failed to get active private IP address" << std::endl;
+        return 1;
+    }
+
+    std::cout << "Using server address: " << server_address << std::endl;
 
     std::cout << "Enter port: ";
     std::cin >> server_port;
 
     // Update the servers list with the new server
     update_servers_list();
+
+    // Start a thread to listen for broadcast responses
+    std::thread listen_thread(&Server::listen_for_broadcasts, this);
+    listen_thread.detach();  // Detach so it runs in the background
+
+    // Broadcast discovery message
+    broadcast_discovery_message();
 
     static struct lws_protocols protocols[] = {
         {"http", lws_callback_http_dummy, 0, 0},
@@ -276,11 +371,8 @@ int Server::server_main(void) {
 
     std::cout << "Server started on port " << server_port << std::endl;
 
-    // Check if there is more than one server in the list before attempting connections
-    std::vector<std::string> servers = list_servers();
-    if (servers.size() > 1) {
-        connect_to_other_servers(context); // Only connect if there's more than 1 server
-    }
+    // Connect to discovered servers
+    connect_to_other_servers(context); 
 
     while (1) {
         lws_service(context, 5000);
@@ -289,6 +381,7 @@ int Server::server_main(void) {
     lws_context_destroy(context);
     return 0;
 }
+
 
 std::vector<std::string> Server::list_servers() {
     std::ifstream file("servers.txt");
@@ -335,3 +428,8 @@ int main() {
     server.server_main();
     return 0;
 }
+
+/*
+Group 7
+Bunsarak Ann | Cyrus Kelly | Md Raiyan Rahman
+*/

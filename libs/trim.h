@@ -12,3 +12,8 @@ std::string trim(const std::string& line) {
 
 
 #endif // !TRIM_OLAF_N
+
+/*
+Group 7
+Bunsarak Ann | Cyrus Kelly | Md Raiyan Rahman
+*/

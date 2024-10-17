@@ -16,3 +16,8 @@ char* create_chat_message(const char* message, const char* iv, const char* ciphe
 
     return json_str; // Remember to free this string after sending it!
 }
+
+/*
+Group 7
+Bunsarak Ann | Cyrus Kelly | Md Raiyan Rahman
+*/

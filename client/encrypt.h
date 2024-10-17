@@ -18,3 +18,9 @@ void encrypt_aes_gcm(const unsigned char *plaintext, int plaintext_len,
                      unsigned char *ciphertext, unsigned char *tag);
 
 #endif
+
+
+/*
+Group 7
+Bunsarak Ann | Cyrus Kelly | Md Raiyan Rahman
+*/
