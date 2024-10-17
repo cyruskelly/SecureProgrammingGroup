@@ -1,435 +1,237 @@
-#include "server.h"
 #include <iostream>
+#include <vector>
+#include <string>
+#include <thread>
+#include <sstream>
+#include <openssl/rsa.h>
+#include <openssl/pem.h>
+#include <openssl/err.h>
+#include <openssl/sha.h>
+#include <boost/asio.hpp>
+#include <boost/asio/ip/udp.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/algorithm/string.hpp>
+#include <nlohmann/json.hpp>  // JSON parsing library
 
-int Server::callback_server(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
-     // Cast user to Server* to call non-static member functions
-    Server *server_instance = static_cast<Server *>(user);  // Assuming user data points to a Server instance
-    rapidjson::Document * d;
-    std::string rq_type;
+using namespace boost::asio;
+using namespace std;
+using json = nlohmann::json;
 
-    char *received_message = (char *)in;
-    switch (reason) {
-        case LWS_CALLBACK_RECEIVE:
-            received_message[len] = '\0';
-            printf("Message received from another server: %s\n", received_message);
-            d = parse_json(received_message);
-            rq_type = (*d)["type"].GetString();
-            printf("Request type: %s\n", rq_type.c_str());
+// Global variables
+std::vector<std::tuple<ip::tcp::socket *, std::string, ip::tcp::endpoint>> clients;
+std::vector<std::tuple<std::string, unsigned short>> server_to_connect;
+std::vector<ip::tcp::socket *> connected_servers;
 
-            if (rq_type == "client_update") {
-                for (rapidjson::Value::ConstValueIterator itr = (*d)["clients"].GetArray().Begin(); itr != (*d)["clients"].GetArray().End(); ++itr) {
-                    for (serv s : server_instance->servers) {
-                        if (s.address == itr->GetString()) {
-                            s.clients.push_back(itr->GetString());
-                        }
-                    }
-                }
-                
-            } else if (rq_type == "client_update_request") {
-                // Relay the message to all other servers
-                server_instance->server_hello(wsi);
-            } else if (rq_type == "signed_data") {
-                if ((*d)["data"]["type"].GetString() == "server_hello") {
-                    // Add the server to the list of connected servers
-                    server_instance->connected_servers.push_back(wsi);
+std::string server_ip;
+unsigned short server_port = 34568;
 
-                    // Create an instance of serv
-                    serv new_server;
-                    new_server.address = (*d)["data"]["sender"].GetString();
-                    new_server.clients = std::vector<std::string>();
+io_context io_context_;
 
-                    server_instance->servers.push_back(new_server);
-                }
+std::string get_active_private_ip() {
+    ip::udp::socket socket_(io_context_, ip::udp::v4());
+    ip::udp::endpoint remote_endpoint = ip::udp::endpoint(ip::address::from_string("8.8.8.8"), 53);
+    socket_.connect(remote_endpoint);
+    ip::address addr = socket_.local_endpoint().address();
+    return addr.to_string();
+}
+
+std::string get_client_public_key(ip::tcp::socket *client_socket) {
+    for (auto &client : clients) {
+        if (std::get<0>(client) == client_socket) {
+            return std::get<1>(client);
+        }
+    }
+    return "";
+}
+
+void forward_message_to_other_servers(const std::string &message_data, const ip::tcp::endpoint &client_address) {
+    for (auto *server_socket : connected_servers) {
+        try {
+            std::stringstream ss;
+            ss << message_data;
+            boost::asio::write(*server_socket, boost::asio::buffer(ss.str()));
+            std::cout << "[FORWARDED] Message forwarded to other server.\n";
+        } catch (const std::exception &e) {
+            std::cerr << "[ERROR] Could not forward message: " << e.what() << "\n";
+        }
+    }
+}
+
+bool verify_signature(const json &message_data, const std::string &signature_base64, ip::tcp::socket *client_socket) {
+    std::string public_key_pem = get_client_public_key(client_socket);
+    if (public_key_pem.empty()) {
+        std::cerr << "[ERROR] Public key not found for the client.\n";
+        return false;
+    }
+
+    // Load public key for signature verification
+    BIO *bio = BIO_new_mem_buf(public_key_pem.c_str(), -1);
+    RSA *rsa_public_key = PEM_read_bio_RSA_PUBKEY(bio, NULL, NULL, NULL);
+
+    if (!rsa_public_key) {
+        std::cerr << "[ERROR] Failed to load public key: " << ERR_error_string(ERR_get_error(), NULL) << "\n";
+        BIO_free(bio);
+        return false;
+    }
+
+    // Hash the message data to verify the signature
+    std::string message_to_verify = message_data.dump();
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char *>(message_to_verify.c_str()), message_to_verify.size(), hash);
+
+    // Decode the signature from base64
+    std::vector<unsigned char> signature;
+    signature.resize(RSA_size(rsa_public_key));
+    size_t signature_len = EVP_DecodeBlock(signature.data(), reinterpret_cast<const unsigned char *>(signature_base64.c_str()), signature_base64.size());
+
+    // Verify the signature
+    int verification_result = RSA_verify(NID_sha256, hash, SHA256_DIGEST_LENGTH, signature.data(), signature_len, rsa_public_key);
+
+    RSA_free(rsa_public_key);
+    BIO_free(bio);
+
+    return verification_result == 1;
+}
+
+void handle_client(ip::tcp::socket *client_socket, ip::tcp::endpoint client_address) {
+    std::string public_key;
+
+    try {
+        for (;;) {
+            char message[1024] = {0};
+            size_t length = client_socket->read_some(boost::asio::buffer(message));
+
+            if (length == 0) {
+                std::cout << "[DISCONNECTED] Client disconnected.\n";
+                break;
             }
 
-            break;
+            std::string received_message(message, length);
+            std::cout << "[MESSAGE] Received: " << received_message << "\n";
 
-        case LWS_CALLBACK_ESTABLISHED:
-            printf("Connected to another server\n");
-            lws_callback_on_writable(wsi);
-            break;
+            // Parse message using JSON
+            json parsed_message = json::parse(received_message);
 
-        case LWS_CALLBACK_CLOSED:
-            printf("Disconnected from another server\n");
-            break;
-
-        default:
-            break;
-    }
-    return 0;
-}
-
-int Server::callback_chat(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
-    Server *server_instance = static_cast<Server *>(user);
-
-    char *received_message = (char *)in;
-    rapidjson::Document * d;
-    rapidjson::Document * d_response;
-    std::string rq_type;
-    std::string signed_rq_type;
-
-
-
-    switch (reason) {
-        case LWS_CALLBACK_RECEIVE:
-            received_message[len] = '\0';  // Make sure to null-terminate the message
-            printf("Message received: %s\n", received_message);
-            // Here you would decrypt and handle the received message
-            d = parse_json(received_message);
-            rq_type = (*d)["type"].GetString();
-            printf("Request type: %s\n", rq_type.c_str());
-
-            if (rq_type == "client_update") {
-                for (rapidjson::Value::ConstValueIterator itr = (*d)["clients"].GetArray().Begin(); itr != (*d)["clients"].GetArray().End(); ++itr) {
-                    for (serv s : server_instance->servers) {
-                        if (s.address == itr->GetString()) {
-                            s.clients.push_back(itr->GetString());
-                        }
-                    }
+            if (parsed_message["type"] == "hello") {
+                public_key = parsed_message["data"]["public_key"].get<std::string>();
+                clients.push_back(make_tuple(client_socket, public_key, client_address));
+                std::cout << "[HELLO] Stored public key from client.\n";
+            } else if (parsed_message["type"] == "signed_data") {
+                std::string signature = parsed_message["signature"].get<std::string>();
+                if (verify_signature(parsed_message["data"], signature, client_socket)) {
+                    // Handle forwarding logic or execute command
+                    std::cout << "[VERIFIED] Message signature is valid.\n";
+                } else {
+                    std::cerr << "[ERROR] Invalid signature.\n";
                 }
-                
-            } else if (rq_type == "client_update_request") {
-                // Relay the message to all other servers
-                server_instance->server_hello(wsi);
-            } else if (rq_type == "signed_data") {
-                signed_rq_type = (*d)["data"]["type"].GetString() == "server_hello";
-                if (signed_rq_type == "server_hello") {
-                    // Add the server to the list of connected servers
-                    server_instance->connected_servers.push_back(wsi);
-
-                    // Create an instance of serv
-                    serv new_server;
-                    new_server.address = (*d)["data"]["sender"].GetString();
-                    new_server.clients = std::vector<std::string>();
-
-                    server_instance->servers.push_back(new_server);
-                } else if (signed_rq_type == "hello") {
-                    // Add the client to the list of clients
-                    server_instance->add_client((*d)["data"]["public_key"].GetString());
-                } else if (signed_rq_type == "client_update") {
-                    server_instance->send_client_update_to_server(wsi);  // Use server_instance
-                } 
-
             }
-
-
-        case LWS_CALLBACK_ESTABLISHED:
-            printf("Client connected\n");
-            break;
-
-        case LWS_CALLBACK_CLOSED:
-            printf("Client disconnected\n");
-            break;
-
-        default:
-            break;
-    }
-    return 0;
-}
-
-rapidjson::Document * Server::parse_json(const char *json) {
-    rapidjson::Document * d = new rapidjson::Document();
-    d->Parse(json);
-    return d;
-}
-
-void Server::server_hello(lws *wsi) {
-    std::string server_hello = "{ \"type\": \"signed_data\", \"data\": { \"type\": \"server_hello\", \"sender\": \"";
-    server_hello += server_address + ":" + std::to_string(server_port);
-    server_hello += "\" } }";
-    relay_message_to_server(server_hello, wsi);
-}
-
-void Server::connect_to_other_servers(struct lws_context *context) {
-    std::vector<std::string> servers = list_servers();  // List of known servers
-    std::string addr;
-    int port = 8080; // Default port
-
-    for (const auto &server : servers) {
-        size_t colon_pos = server.find(':');
-        if (colon_pos != std::string::npos) {
-            addr = server.substr(0, colon_pos);
-            port = std::stoi(server.substr(colon_pos + 1));
-        } else {
-            addr = server;
         }
+    } catch (const std::exception &e) {
+        std::cerr << "[ERROR] Client connection error: " << e.what() << "\n";
+    }
 
-        if (addr == server_address && port == server_port) {
-            continue;
-        }
+    // Close the client socket once disconnected
+    client_socket->close();
+}
 
-        struct lws_client_connect_info ccinfo = {0};
-        ccinfo.context = context;
-        ccinfo.address = addr.c_str();
-        ccinfo.port = port;
-        ccinfo.path = "/";
-        ccinfo.protocol = "server-protocol";
-        ccinfo.host = lws_canonical_hostname(context);
-        ccinfo.origin = "origin";
-        ccinfo.ietf_version_or_minus_one = -1;
-        ccinfo.ssl_connection = 0;
-        ccinfo.userdata = this;
+void start_server(const std::string &host, unsigned short port) {
+    ip::tcp::acceptor acceptor_(io_context_, ip::tcp::endpoint(ip::tcp::v4(), port));
+    std::cout << "[LISTENING] Server is listening on " << host << ":" << port << "\n";
 
-        struct lws *wsi = lws_client_connect_via_info(&ccinfo);
-        if (wsi == NULL) {
-            printf("Failed to connect to server: %s\n", server.c_str());
-        } else {
-            printf("Connected to server: %s\n", server.c_str());
-            server_hello(wsi);  // Send hello once connected
-        }
+    for (;;) {
+        ip::tcp::socket *client_socket = new ip::tcp::socket(io_context_);
+        acceptor_.accept(*client_socket);
+        ip::tcp::endpoint client_endpoint = client_socket->remote_endpoint();
+        std::cout << "[NEW CONNECTION] Client connected from: " << client_endpoint << "\n";
+
+        std::thread(handle_client, client_socket, client_endpoint).detach();
     }
 }
 
-
-void Server::send_client_update_to_server(struct lws* server) {
-    // Read clients from the file
-    std::vector<std::string> clients = read_clients();
-    
-    // Format the list of clients as JSON
-    std::string client_update = "{ \"type\": \"client_update\", \"clients\": [";
-    for (size_t i = 0; i < clients.size(); i++) {
-        client_update += "\"" + clients[i] + "\"";
-        if (i < clients.size() - 1) {
-            client_update += ", ";
-        }
-    }
-    client_update += "] }";
-
-    // Send the list of clients to all other servers
-    relay_message_to_server(client_update, server);
-}
-
-std::vector<std::string> Server::read_clients() {
-    std::ifstream file("./data/clients.txt");
-    std::string line;
-    std::vector<std::string> clients;
-    std::string client;
-
-    while (std::getline(file, line)) {
-        if (line[0] == '{') {
-            client = "";
-        } else if (line[0] == '}') {
-            client = trim(client);
-            clients.push_back(client);
-        } else {
-            client += line + "\n";
-        }
-    }
-    return clients;
-}
-
-void Server::relay_message_to_all_servers(const std::string &message) {
-    // Loop through connected servers and send the message
-    for (const auto &server : connected_servers) {
-        unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + 8192 + LWS_SEND_BUFFER_POST_PADDING];
-        memset(buf, 0, sizeof(buf));
-        size_t n = message.size();
-        memcpy(buf + LWS_SEND_BUFFER_PRE_PADDING, message.c_str(), n);
-        lws_write(server, buf + LWS_SEND_BUFFER_PRE_PADDING, n, LWS_WRITE_TEXT);
-        lws_callback_on_writable(server);
-
-    }
-}
-
-void Server::relay_message_to_server(const std::string &message, lws *wsi) {
-    unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + 8192 + LWS_SEND_BUFFER_POST_PADDING];
-    memset(buf, 0, sizeof(buf));
-    size_t n = message.size();
-    memcpy(buf + LWS_SEND_BUFFER_PRE_PADDING, message.c_str(), n);
-    if (wsi != NULL) {
-        lws_write(wsi, buf + LWS_SEND_BUFFER_PRE_PADDING, n, LWS_WRITE_TEXT);
-        lws_callback_on_writable(wsi);
-        printf("Relaying message: %s\n", message.c_str());
-    } else {
-        printf("Error: Server not connected\n");
-    }
-}
-
-void Server::broadcast_discovery_message() {
-    int sock;
-    struct sockaddr_in broadcast_addr;
-    std::string message = "{ \"data\": { \"type\": \"server_hello\", \"sender\": \"" + server_address + ":" + std::to_string(server_port) + "\" } }";
-    int broadcast = 1;
-
-    // Create a socket for broadcasting
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        perror("socket");
-        return;
-    }
-
-    // Set socket options to enable broadcast
-    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
-        perror("setsockopt");
-        return;
-    }
-
-    // Define the broadcast address
-    memset(&broadcast_addr, 0, sizeof(broadcast_addr));
-    broadcast_addr.sin_family = AF_INET;
-    broadcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-    broadcast_addr.sin_port = htons(12345);  // The broadcast port
-
-    // Send the broadcast message
-    if (sendto(sock, message.c_str(), message.length(), 0, (struct sockaddr *)&broadcast_addr, sizeof(broadcast_addr)) < 0) {
-        perror("sendto");
-    } else {
-        printf("Broadcast message sent: %s\n", message.c_str());
-    }
-
-    close(sock);
-}
-
-void Server::listen_for_broadcasts() {
-    int sock;
-    struct sockaddr_in recv_addr;
-    socklen_t addr_len;
+void listen_for_broadcasts() {
+    ip::udp::socket socket_(io_context_, ip::udp::endpoint(ip::udp::v4(), 12345));
     char buffer[1024];
+    for (;;) {
+        ip::udp::endpoint client_endpoint;
+        size_t length = socket_.receive_from(boost::asio::buffer(buffer), client_endpoint);
+        std::string received_message(buffer, length);
 
-    // Create a socket to listen for UDP messages
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        perror("socket");
-        return;
-    }
+        // Parse the received message, check if it is "server_hello", and respond with "server_response"
+        json message = json::parse(received_message);
+        if (message["data"]["type"] == "server_hello") {
+            std::cout << "[RECEIVED] Broadcast from " << client_endpoint << ": " << received_message << "\n";
 
-    // Bind the socket to all interfaces and the broadcast port
-    memset(&recv_addr, 0, sizeof(recv_addr));
-    recv_addr.sin_family = AF_INET;
-    recv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    recv_addr.sin_port = htons(12345);
+            // Respond with "server_response"
+            json response_message = {
+                {"data", {{"type", "server_response"}, {"sender", server_ip}, {"port", server_port}}}
+            };
 
-    if (bind(sock, (struct sockaddr *)&recv_addr, sizeof(recv_addr)) < 0) {
-        perror("bind");
-        return;
-    }
-
-    while (true) {
-        // Listen for broadcast messages
-        addr_len = sizeof(recv_addr);
-        if (recvfrom(sock, buffer, sizeof(buffer), 0, (struct sockaddr *)&recv_addr, &addr_len) < 0) {
-            perror("recvfrom");
-            continue;
-        }
-
-        // Parse and handle the received message
-        rapidjson::Document *d = parse_json(buffer);
-        std::string type = (*d)["data"]["type"].GetString();
-        if (type == "server_hello") {
-            std::string sender = (*d)["data"]["sender"].GetString();
-            printf("Received server_hello from %s\n", sender.c_str());
-
-            // Add the discovered server to the list of known servers
-            servers.push_back({sender, std::vector<std::string>()});
+            std::string response_str = response_message.dump();
+            socket_.send_to(boost::asio::buffer(response_str), client_endpoint);
+            std::cout << "[RESPONSE] Sent server_response to " << client_endpoint << "\n";
         }
     }
-
-    close(sock);
 }
 
+void broadcast_discovery_message() {
+    ip::udp::socket socket_(io_context_, ip::udp::v4());
+    socket_.set_option(ip::udp::socket::reuse_address(true));
+    socket_.set_option(boost::asio::socket_base::broadcast(true));
 
-int Server::server_main(void) {
-    // Get the dynamic private IP address like in the Python script
-    server_address = get_active_private_ip();
-    if (server_address.empty()) {
-        std::cerr << "Failed to get active private IP address" << std::endl;
-        return 1;
+    std::string private_ip = get_active_private_ip();
+    if (private_ip.empty()) {
+        std::cerr << "Unable to send broadcast message: could not determine private IP.\n";
+        return;
     }
 
-    std::cout << "Using server address: " << server_address << std::endl;
-
-    std::cout << "Enter port: ";
-    std::cin >> server_port;
-
-    // Update the servers list with the new server
-    update_servers_list();
-
-    // Start a thread to listen for broadcast responses
-    std::thread listen_thread(&Server::listen_for_broadcasts, this);
-    listen_thread.detach();  // Detach so it runs in the background
-
-    // Broadcast discovery message
-    broadcast_discovery_message();
-
-    static struct lws_protocols protocols[] = {
-        {"http", lws_callback_http_dummy, 0, 0},
-        {"chat-protocol", Server::callback_chat, 0, 8192},
-        {"server-protocol", Server::callback_server, 0, 8192},
-        {NULL, NULL, 0, 0} // terminator
+    json message = {
+        {"data", {{"type", "server_hello"}, {"sender", private_ip}}}
     };
 
-    struct lws_context_creation_info info;
-    memset(&info, 0, sizeof(info));
-    info.port = server_port;
-    info.protocols = protocols;
+    std::string message_str = message.dump();
+    ip::udp::endpoint broadcast_endpoint(ip::address_v4::broadcast(), 12345);
+    socket_.send_to(boost::asio::buffer(message_str), broadcast_endpoint);
 
-    struct lws_context *context = lws_create_context(&info);
-    if (!context) {
-        std::cerr << "Failed to create WebSocket context" << std::endl;
+    std::cout << "Broadcast message sent from " << private_ip << " on port 12345.\n";
+}
+
+void connect_to_other_servers() {
+    for (auto &server : server_to_connect) {
+        std::string ip = std::get<0>(server);
+        unsigned short port = std::get<1>(server);
+        while (true) {
+            try {
+                ip::tcp::socket *server_socket = new ip::tcp::socket(io_context_);
+                server_socket->connect(ip::tcp::endpoint(ip::address::from_string(ip), port));
+                connected_servers.push_back(server_socket);
+                std::cout << "[CONNECTED TO SERVER] Connected to " << ip << ":" << port << "\n";
+                break;
+            } catch (const std::exception &e) {
+                std::cerr << "[ERROR] Could not connect to server " << ip << ":" << port << ": " << e.what() << "\n";
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+            }
+        }
+    }
+}
+
+int main() {
+    server_ip = get_active_private_ip();
+    if (server_ip.empty()) {
+        std::cerr << "Failed to get active private IP address.\n";
         return 1;
     }
 
-    std::cout << "Server started on port " << server_port << std::endl;
+    std::cout << "Using server IP: " << server_ip << "\n";
 
-    // Connect to discovered servers
-    connect_to_other_servers(context); 
+    std::thread server_thread(start_server, "0.0.0.0", server_port);
+    std::thread broadcast_thread(listen_for_broadcasts);
 
-    while (1) {
-        lws_service(context, 5000);
-    }
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    broadcast_discovery_message();
+    connect_to_other_servers();
 
-    lws_context_destroy(context);
+    server_thread.join();
+    broadcast_thread.join();
+
     return 0;
 }
-
-
-std::vector<std::string> Server::list_servers() {
-    std::ifstream file("servers.txt");
-    std::string line;
-    std::vector<std::string> servers;
-
-    if (!file.is_open()) {
-        std::cerr << "Error: Could not open servers.txt" << std::endl;
-        return servers;
-    }
-
-    while (std::getline(file, line)) {
-        // Trim leading/trailing whitespaces and skip empty lines
-        line = trim(line);  // Trim whitespaces using the custom `trim()` function
-
-        if (!line.empty()) {  // Only process non-empty lines
-            servers.push_back(line);
-            std::cout << "Found server: " << line << std::endl;  // Debugging log to verify the server being added
-        }
-    }
-
-    file.close();
-    return servers;
-}
-
-
-int Server::add_client(std::string client) {
-    std::vector<std::string> client_list = read_clients();
-    for (std::string c : client_list) {
-        if (c == client) {
-            return 0;
-        }
-    }
-
-    FILE *file = fopen("./data/clients.txt", "a");
-    fprintf(file, "{\n%s\n}\n", client.c_str());
-    fclose(file);
-    return 0;
-}
-
-
-int main() {
-    Server server;
-    server.server_main();
-    return 0;
-}
-
-/*
-Group 7
-Bunsarak Ann | Cyrus Kelly | Md Raiyan Rahman
-*/
