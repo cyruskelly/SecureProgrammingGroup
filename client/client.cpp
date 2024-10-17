@@ -31,7 +31,7 @@ std::string get_active_private_ip() {
 std::string base64_encode(const unsigned char* input, int length) {
     BIO *bmem = NULL, *b64 = NULL;
     BUF_MEM *bptr;
-    
+
     b64 = BIO_new(BIO_f_base64());
     bmem = BIO_new(BIO_s_mem());
     b64 = BIO_push(b64, bmem);
@@ -58,7 +58,7 @@ RSA* generate_rsa_keypair() {
 std::string get_public_key_pem(RSA* rsa_keypair) {
     BIO* bio = BIO_new(BIO_s_mem());
     PEM_write_bio_RSA_PUBKEY(bio, rsa_keypair);
-    
+
     BUF_MEM* buffer_ptr;
     BIO_get_mem_ptr(bio, &buffer_ptr);
     std::string public_key_pem(buffer_ptr->data, buffer_ptr->length);
@@ -131,7 +131,7 @@ void send_messages(ip::tcp::socket &client_socket, RSA* private_key) {
     std::string message;
 
     while (true) {
-        std::cout << "Enter destination IP (or 'exit' to quit): ";
+        std::cout << "Enter destination IP or 'exit' to quit: ";
         std::getline(std::cin, destination_ip);
 
         if (destination_ip == "exit") {
@@ -165,16 +165,21 @@ void send_messages(ip::tcp::socket &client_socket, RSA* private_key) {
     }
 }
 
-
 int main() {
-    std::string host = get_active_private_ip();
-    unsigned short port = 23456;
+    std::string server_ip;
+    unsigned short server_port;
+
+    std::cout << "Enter server IP to connect to: ";
+    std::getline(std::cin, server_ip);
+
+    std::cout << "Enter server port: ";
+    std::cin >> server_port;
 
     ip::tcp::socket client_socket(io_context_);
 
     try {
-        client_socket.connect(ip::tcp::endpoint(ip::address::from_string(host), port));
-        std::cout << "[CONNECTED] Connected to server at " << host << ":" << port << "\n";
+        client_socket.connect(ip::tcp::endpoint(ip::address::from_string(server_ip), server_port));
+        std::cout << "[CONNECTED] Connected to server at " << server_ip << ":" << server_port << "\n";
 
         RSA* private_key = generate_rsa_keypair();
         std::string public_key_pem = get_public_key_pem(private_key);
