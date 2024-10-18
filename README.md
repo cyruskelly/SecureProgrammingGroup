@@ -1,3 +1,5 @@
+# WARNING: THIS CODE IS VULNERABLE AND SHOULD NOT BE USED IN A PRODUCTION ENVIRONMENT
+# LINK TO THE NON_VULNERABLE IMPLEMENTATION => https://github.com/cyruskelly/SecureProgrammingPython
 # Submitted by: Group 7
 
 Bunsarak Ann | Cyrus Kelly | Md Raiyan Rahman
